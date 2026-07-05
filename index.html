@@ -189,9 +189,9 @@
 <script>
 "use strict";
 
-// ==== 設定（デプロイ時に置き換える） ====
-const LIFF_ID = "REPLACE_WITH_LIFF_ID";                       // LINE DevelopersのLIFF ID
-const API_URL = "REPLACE_WITH_CLOUD_FUNCTION_URL/site-data";  // 例: https://asia-northeast1-xxx.cloudfunctions.net/codomon-line-bot/site-data
+// ==== 設定 ====
+const LIFF_ID = "2010609702-QbzK9ZNU";  // LINEミニアプリ（本番用）
+const API_URL = "https://asia-northeast1-codmon-checker.cloudfunctions.net/codomon-line-bot/site-data";
 // LINEアプリ外で開かれた場合でもコンテンツを出さない（データ自体はAPI側でも保護）
 const REQUIRE_LINE_CLIENT = true;
 
