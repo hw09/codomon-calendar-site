@@ -1,0 +1,463 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<title>ようちえんカレンダー</title>
+<!--
+  カレンダーサイト（GitHub Pages・公開）
+  このファイルは画面の枠のみで、園名・行事等の実データは一切含まない。
+  データは LIFF IDトークンで認証した上で Cloud Function の /site-data から取得する。
+-->
+<script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+<style>
+  :root {
+    --primary: #06c755;
+    --primary-dark: #05a648;
+    --bg: #f7f8f9;
+    --card: #ffffff;
+    --text: #222;
+    --muted: #8a949e;
+    --gray-day: #b6bdc4;
+    --line: #e6e9ec;
+    --badge: #ff8c00;
+    --today-bg: #e7f9ee;
+    --radius: 14px;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { height: 100%; }
+  body {
+    font-family: "Hiragino Kaku Gothic ProN", "Hiragino Sans", "Noto Sans JP", sans-serif;
+    background: var(--bg); color: var(--text); font-size: 15px;
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  .hidden { display: none !important; }
+
+  /* ---- 案内画面（未ログイン・LINE外・エラー） ---- */
+  #notice {
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    min-height: 100vh; padding: 32px; text-align: center; gap: 16px;
+  }
+  #notice .icon { font-size: 48px; }
+  #notice p { color: var(--muted); line-height: 1.7; }
+
+  /* ---- ヘッダー ---- */
+  header {
+    position: sticky; top: 0; z-index: 10;
+    background: var(--card); border-bottom: 1px solid var(--line);
+    padding: 10px 12px 8px;
+  }
+  .header-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .month-nav { display: flex; align-items: center; gap: 4px; }
+  .month-label { font-size: 18px; font-weight: 700; min-width: 7.2em; text-align: center; }
+  .nav-btn {
+    border: 1px solid var(--line); background: var(--card); border-radius: 10px;
+    width: 34px; height: 34px; font-size: 16px; color: var(--text); cursor: pointer;
+  }
+  .header-right { display: flex; align-items: center; gap: 6px; }
+  #todayBtn {
+    border: 1px solid var(--primary); color: var(--primary); background: var(--card);
+    border-radius: 10px; height: 34px; padding: 0 10px; font-size: 13px; font-weight: 600; cursor: pointer;
+  }
+  /* クラス切替タブ（ピル型セグメント） */
+  #classTabs {
+    display: flex; border: 1px solid var(--line); border-radius: 999px;
+    background: var(--bg); padding: 2px; height: 34px;
+  }
+  #classTabs button {
+    border: none; background: transparent; border-radius: 999px;
+    padding: 0 12px; font-size: 13px; font-weight: 600; color: var(--muted); cursor: pointer;
+  }
+  #classTabs button.active { background: var(--primary); color: #fff; }
+  .meta { font-size: 11px; color: var(--muted); margin-top: 6px; text-align: right; }
+
+  /* ---- カレンダー ---- */
+  main { padding: 8px 8px 90px; }
+  .weekdays, .grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 3px; }
+  .weekdays div { text-align: center; font-size: 11px; color: var(--muted); padding: 4px 0; }
+  .day {
+    background: var(--card); border-radius: 10px; min-height: 64px; padding: 4px 3px;
+    display: flex; flex-direction: column; align-items: stretch; gap: 2px;
+    border: 1px solid transparent; cursor: pointer; overflow: hidden;
+  }
+  .day.out { visibility: hidden; }
+  .day.grayed { background: #eef0f2; }
+  .day.grayed .num { color: var(--gray-day); }
+  .day.today { border-color: var(--primary); background: var(--today-bg); }
+  .num { font-size: 12px; font-weight: 600; text-align: center; }
+  .day.today .num { color: var(--primary-dark); }
+  .ev {
+    font-size: 9px; line-height: 1.25; color: #fff; background: var(--badge);
+    border-radius: 4px; padding: 1px 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .ev.holiday { background: var(--gray-day); }
+  .ev.more { background: transparent; color: var(--muted); text-align: center; }
+
+  /* ---- 下部シート ---- */
+  #backdrop {
+    position: fixed; inset: 0; background: rgba(0,0,0,.35); z-index: 20;
+    opacity: 0; pointer-events: none; transition: opacity .2s;
+  }
+  #backdrop.show { opacity: 1; pointer-events: auto; }
+  #sheet {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 21;
+    background: var(--card); border-radius: 18px 18px 0 0;
+    max-height: 72vh; overflow-y: auto;
+    padding: 10px 18px calc(24px + env(safe-area-inset-bottom));
+    transform: translateY(100%); transition: transform .25s ease-out;
+    box-shadow: 0 -4px 24px rgba(0,0,0,.15);
+  }
+  #sheet.show { transform: translateY(0); }
+  .sheet-handle { width: 40px; height: 4px; border-radius: 2px; background: var(--line); margin: 0 auto 10px; }
+  .sheet-date { font-size: 16px; font-weight: 700; margin-bottom: 2px; }
+  .sheet-class { font-size: 12px; color: var(--muted); margin-bottom: 10px; }
+  .section { margin-bottom: 12px; }
+  .section h3 { font-size: 13px; color: var(--primary-dark); margin-bottom: 4px; }
+  .section p, .section li { font-size: 14px; line-height: 1.65; }
+  .section ul { list-style: none; }
+  .section li { padding-left: 1em; text-indent: -1em; }
+  .section li::before { content: "・"; }
+  .section .empty { color: var(--muted); }
+  .range-note {
+    font-size: 12px; color: var(--muted); background: var(--bg);
+    border-radius: 8px; padding: 8px 10px; margin-top: 4px; line-height: 1.6;
+  }
+  .stale-note { font-size: 11px; color: var(--badge); margin-top: 4px; }
+
+  /* ---- フッター（免責） ---- */
+  footer {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 5;
+    background: var(--bg); border-top: 1px solid var(--line);
+    padding: 8px 14px calc(8px + env(safe-area-inset-bottom));
+    font-size: 10px; color: var(--muted); line-height: 1.5;
+  }
+  #loading {
+    display: flex; align-items: center; justify-content: center; gap: 10px;
+    min-height: 100vh; color: var(--muted);
+  }
+  .spinner {
+    width: 22px; height: 22px; border: 3px solid var(--line); border-top-color: var(--primary);
+    border-radius: 50%; animation: spin .8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+
+<div id="loading"><div class="spinner"></div>読み込み中…</div>
+
+<div id="notice" class="hidden">
+  <div class="icon">📅</div>
+  <p id="noticeText">LINEのボットからお開きください。</p>
+</div>
+
+<div id="app" class="hidden">
+  <header>
+    <div class="header-row">
+      <div class="month-nav">
+        <button class="nav-btn" id="prevBtn" aria-label="前月">‹</button>
+        <div class="month-label" id="monthLabel"></div>
+        <button class="nav-btn" id="nextBtn" aria-label="翌月">›</button>
+      </div>
+      <div class="header-right">
+        <button id="todayBtn">今日</button>
+        <div id="classTabs"></div>
+      </div>
+    </div>
+    <div class="meta" id="generatedAt"></div>
+  </header>
+
+  <main>
+    <div class="weekdays">
+      <div>日</div><div>月</div><div>火</div><div>水</div><div>木</div><div>金</div><div>土</div>
+    </div>
+    <div class="grid" id="grid"></div>
+  </main>
+
+  <footer id="disclaimer"></footer>
+</div>
+
+<div id="backdrop"></div>
+<div id="sheet">
+  <div class="sheet-handle"></div>
+  <div class="sheet-date" id="sheetDate"></div>
+  <div class="sheet-class" id="sheetClass"></div>
+  <div id="sheetBody"></div>
+</div>
+
+<script>
+"use strict";
+
+// ==== 設定（デプロイ時に置き換える） ====
+const LIFF_ID = "REPLACE_WITH_LIFF_ID";                       // LINE DevelopersのLIFF ID
+const API_URL = "REPLACE_WITH_CLOUD_FUNCTION_URL/site-data";  // 例: https://asia-northeast1-xxx.cloudfunctions.net/codomon-line-bot/site-data
+// LINEアプリ外で開かれた場合でもコンテンツを出さない（データ自体はAPI側でも保護）
+const REQUIRE_LINE_CLIENT = true;
+
+const DISCLAIMER =
+  "※この情報はAIが作成しています。誤りが含まれる場合があるため、" +
+  "正確な情報は元の配信資料をご確認ください。";
+
+const WEEKDAY_JA = ["日", "月", "火", "水", "木", "金", "土"];
+
+let siteData = null;        // /site-data のレスポンス
+let currentClass = null;    // 選択中の site_target ID
+let viewYear, viewMonth;    // 表示中の年月（monthは0始まり）
+
+const $ = (id) => document.getElementById(id);
+
+function showNotice(text) {
+  $("loading").classList.add("hidden");
+  $("app").classList.add("hidden");
+  $("noticeText").textContent = text;
+  $("notice").classList.remove("hidden");
+}
+
+function todayISO() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+// ==== 起動 ====
+async function boot() {
+  try {
+    await liff.init({ liffId: LIFF_ID });
+  } catch (e) {
+    showNotice("読み込みに失敗しました。LINEのボットのメニューからお開きください。");
+    return;
+  }
+
+  if (REQUIRE_LINE_CLIENT && !liff.isInClient()) {
+    showNotice("このページはLINEアプリ内でのみご覧いただけます。LINEのボットのメニュー、またはリマインドのリンクからお開きください。");
+    return;
+  }
+  if (!liff.isLoggedIn()) {
+    liff.login();
+    return;
+  }
+
+  const idToken = liff.getIDToken();
+  if (!idToken) {
+    showNotice("ログイン情報を取得できませんでした。LINEのボットからお開き直しください。");
+    return;
+  }
+
+  let res;
+  try {
+    res = await fetch(API_URL, { headers: { Authorization: `Bearer ${idToken}` } });
+  } catch (e) {
+    showNotice("データの取得に失敗しました。通信環境をご確認のうえ、開き直してください。");
+    return;
+  }
+  if (res.status === 401 || res.status === 403) {
+    showNotice("閲覧権限を確認できませんでした。LINEのボットに一度メッセージを送ってから、もう一度お開きください。");
+    return;
+  }
+  if (res.status === 503) {
+    showNotice("カレンダーデータを準備中です。しばらくしてからお開きください。");
+    return;
+  }
+  if (!res.ok) {
+    showNotice("データの取得に失敗しました。しばらくしてから開き直してください。");
+    return;
+  }
+
+  siteData = await res.json();
+  initUI();
+}
+
+// ==== UI初期化 ====
+function initUI() {
+  const classIds = Object.keys(siteData.classes || {});
+  if (classIds.length === 0) {
+    showNotice("表示できるクラスのデータがありません。");
+    return;
+  }
+
+  // クラス選択の復元（localStorage）
+  const saved = localStorage.getItem("selectedClass");
+  currentClass = classIds.includes(saved) ? saved : classIds[0];
+
+  const tabs = $("classTabs");
+  tabs.innerHTML = "";
+  for (const id of classIds) {
+    const btn = document.createElement("button");
+    btn.textContent = siteData.classes[id].label;
+    btn.dataset.classId = id;
+    btn.addEventListener("click", () => {
+      currentClass = id;
+      localStorage.setItem("selectedClass", id);
+      render();
+    });
+    tabs.appendChild(btn);
+  }
+
+  const now = new Date();
+  viewYear = now.getFullYear();
+  viewMonth = now.getMonth();
+
+  $("prevBtn").addEventListener("click", () => moveMonth(-1));
+  $("nextBtn").addEventListener("click", () => moveMonth(1));
+  $("todayBtn").addEventListener("click", () => {
+    const n = new Date();
+    viewYear = n.getFullYear();
+    viewMonth = n.getMonth();
+    render();
+  });
+  $("backdrop").addEventListener("click", closeSheet);
+
+  $("disclaimer").textContent = DISCLAIMER;
+  if (siteData.generated_at) {
+    const dt = new Date(siteData.generated_at);
+    $("generatedAt").textContent =
+      `データ生成: ${dt.getMonth() + 1}/${dt.getDate()} ${String(dt.getHours()).padStart(2, "0")}:${String(dt.getMinutes()).padStart(2, "0")}`;
+  }
+
+  $("loading").classList.add("hidden");
+  $("notice").classList.add("hidden");
+  $("app").classList.remove("hidden");
+  render();
+}
+
+function moveMonth(delta) {
+  viewMonth += delta;
+  if (viewMonth < 0) { viewMonth = 11; viewYear--; }
+  if (viewMonth > 11) { viewMonth = 0; viewYear++; }
+  render();
+}
+
+// ==== データ参照 ====
+function classData() { return siteData.classes[currentClass]; }
+
+function eventsByDate() {
+  const map = {};
+  for (const ev of classData().events || []) {
+    (map[ev.date] = map[ev.date] || []).push(ev);
+  }
+  return map;
+}
+
+function dailyByDate() {
+  const map = {};
+  for (const d of classData().daily || []) map[d.date] = d;
+  return map;
+}
+
+// ==== カレンダー描画 ====
+function render() {
+  // タブのアクティブ状態
+  for (const btn of $("classTabs").children) {
+    btn.classList.toggle("active", btn.dataset.classId === currentClass);
+  }
+
+  $("monthLabel").textContent = `${viewYear}年${viewMonth + 1}月`;
+
+  const evMap = eventsByDate();
+  const today = todayISO();
+  const first = new Date(viewYear, viewMonth, 1);
+  const daysInMonth = new Date(viewYear, viewMonth + 1, 0).getDate();
+  const leading = first.getDay(); // 日曜始まり
+
+  const grid = $("grid");
+  grid.innerHTML = "";
+
+  for (let i = 0; i < leading; i++) {
+    const cell = document.createElement("div");
+    cell.className = "day out";
+    grid.appendChild(cell);
+  }
+
+  for (let day = 1; day <= daysInMonth; day++) {
+    const iso = `${viewYear}-${String(viewMonth + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+    const dow = (leading + day - 1) % 7;
+    const evs = evMap[iso] || [];
+    const isHoliday = evs.some((e) => e.holiday);
+
+    const cell = document.createElement("div");
+    cell.className = "day";
+    if (dow === 0 || dow === 6 || isHoliday) cell.classList.add("grayed");
+    if (iso === today) cell.classList.add("today");
+
+    const num = document.createElement("div");
+    num.className = "num";
+    num.textContent = day;
+    cell.appendChild(num);
+
+    const MAX_BADGES = 2;
+    evs.slice(0, MAX_BADGES).forEach((e) => {
+      const b = document.createElement("div");
+      b.className = "ev" + (e.holiday ? " holiday" : "");
+      b.textContent = e.title;
+      cell.appendChild(b);
+    });
+    if (evs.length > MAX_BADGES) {
+      const more = document.createElement("div");
+      more.className = "ev more";
+      more.textContent = `+${evs.length - MAX_BADGES}`;
+      cell.appendChild(more);
+    }
+
+    cell.addEventListener("click", () => openSheet(iso, dow));
+    grid.appendChild(cell);
+  }
+}
+
+// ==== 下部シート ====
+function esc(s) {
+  return String(s).replace(/[&<>"']/g, (c) =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+function section(title, bodyHtml) {
+  return `<div class="section"><h3>${title}</h3>${bodyHtml}</div>`;
+}
+
+function openSheet(iso, dow) {
+  const [y, m, d] = iso.split("-").map(Number);
+  $("sheetDate").textContent = `${y}年${m}月${d}日（${WEEKDAY_JA[dow]}）`;
+  $("sheetClass").textContent = classData().label;
+
+  const evs = eventsByDate()[iso] || [];
+  const daily = dailyByDate()[iso];
+
+  let html = "";
+
+  // ① イベント
+  if (evs.length > 0) {
+    const items = evs.map((e) => {
+      let t = esc(e.title);
+      if (e.note) t += `<br><span style="color:var(--muted);font-size:12px">${esc(e.note)}</span>`;
+      return `<li>${t}</li>`;
+    }).join("");
+    html += section("イベント", `<ul>${items}</ul>`);
+  } else {
+    html += section("イベント", `<p class="empty">なし</p>`);
+  }
+
+  // ②〜④ 服装・持ち物・その他（生成済み範囲のみ）
+  if (daily) {
+    html += section("服装", daily.clothing ? `<p>${esc(daily.clothing)}</p>` : `<p class="empty">特記なし</p>`);
+    html += section("持ち物", daily.items ? `<p>${esc(daily.items)}</p>` : `<p class="empty">特記なし</p>`);
+    if (daily.other) html += section("その他", `<p>${esc(daily.other)}</p>`);
+    if (daily.stale) {
+      html += `<div class="stale-note">※この日の内容は最新の資料を反映できていない可能性があります。</div>`;
+    }
+  } else {
+    html += `<div class="range-note">この日の服装・持ち物は表示できません。<br>（当日の30日前から表示されます）</div>`;
+  }
+
+  $("sheetBody").innerHTML = html;
+  $("backdrop").classList.add("show");
+  $("sheet").classList.add("show");
+}
+
+function closeSheet() {
+  $("backdrop").classList.remove("show");
+  $("sheet").classList.remove("show");
+}
+
+boot();
+</script>
+</body>
+</html>
