@@ -124,6 +124,7 @@
     border-radius: 8px; padding: 8px 10px; margin-top: 4px; line-height: 1.6;
   }
   .stale-note { font-size: 11px; color: var(--badge); margin-top: 4px; }
+  .sources-note { font-size: 11px; color: var(--muted); margin-top: 8px; line-height: 1.6; }
 
   /* ---- フッター（免責） ---- */
   footer {
@@ -442,6 +443,9 @@ function openSheet(iso, dow) {
     if (daily.other) html += section("その他", `<p>${esc(daily.other)}</p>`);
     if (daily.stale) {
       html += `<div class="stale-note">※この日の内容は最新の資料を反映できていない可能性があります。</div>`;
+    }
+    if (daily.sources && daily.sources.length > 0) {
+      html += `<div class="sources-note">情報元: ${daily.sources.map(esc).join("、")}</div>`;
     }
   } else {
     html += `<div class="range-note">この日の服装・持ち物は表示できません。<br>（当日の30日前から表示されます）</div>`;
