@@ -40,7 +40,7 @@
     min-height: 100vh; padding: 32px; text-align: center; gap: 16px;
   }
   #notice .icon { font-size: 48px; }
-  #notice p { color: var(--muted); line-height: 1.7; }
+  #notice p { color: var(--muted); line-height: 1.7; white-space: pre-line; word-break: break-all; }
 
   /* ---- ヘッダー ---- */
   header {
@@ -192,8 +192,8 @@
 // ==== 設定 ====
 const LIFF_ID = "2010609702-QbzK9ZNU";  // LINEミニアプリ（本番用）
 const API_URL = "https://asia-northeast1-codmon-checker.cloudfunctions.net/codomon-line-bot/site-data";
-// LINEアプリ外で開かれた場合でもコンテンツを出さない（データ自体はAPI側でも保護）
-const REQUIRE_LINE_CLIENT = true;
+// LINEアプリ外ブラウザからの閲覧を許可するか（falseでもデータはAPI側の認証で保護される）
+const REQUIRE_LINE_CLIENT = false;
 
 const DISCLAIMER =
   "※この情報はAIが作成しています。誤りが含まれる場合があるため、" +
@@ -224,8 +224,7 @@ async function boot() {
   try {
     await liff.init({ liffId: LIFF_ID });
   } catch (e) {
-    const detail = (e && (e.code || e.message)) ? `\n[${e.code || ""} ${e.message || ""}]` : "";
-    showNotice("読み込みに失敗しました。LINEのボットのメニューからお開きください。" + detail);
+    showNotice(`読み込みに失敗しました。LINEのボットのメニューからお開きください。\n[v3: ${(e && e.code) || "?"} / ${String(e)}]`);
     return;
   }
 
